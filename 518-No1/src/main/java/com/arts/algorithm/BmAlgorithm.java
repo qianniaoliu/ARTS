@@ -6,9 +6,9 @@ package com.arts.algorithm;
 public class BmAlgorithm {
 
 
-
-
-
+    public static void main(String[] args) {
+        
+    }
 
 
 
