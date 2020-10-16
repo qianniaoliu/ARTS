@@ -19,6 +19,7 @@ public class ArrayListDemo {
         data.add("C");
         data.add("D");
         data.add("E");
+        data.set(11, "F");
         Iterator<String> iterator1 = data.iterator();
         Iterator<String> iterator2 = data.iterator();
         iterator1.next();

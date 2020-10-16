@@ -15,7 +15,7 @@ import java.io.IOException;
 public class EasyExcelDemo {
 
     public static void main(String[] args) throws IOException {
-//        Workbook workbook = new XSSFWorkbook("C:\\Users\\cdshenlong1\\Desktop\\test.xlsx");
+        Workbook workbook = new XSSFWorkbook("C:\\Users\\cdshenlong1\\Desktop\\test.xlsx");
         EasyExcel.read("C:\\Users\\cdshenlong1\\Desktop\\test.xlsx")
                 .registerReadListener(new AnalysisEventListener() {
                     @Override
@@ -29,5 +29,7 @@ public class EasyExcelDemo {
                     }
                 })
                 .doReadAll();
+
+        System.out.println(11);
     }
 }
