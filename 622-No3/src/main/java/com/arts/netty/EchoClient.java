@@ -20,6 +20,7 @@ import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.serialization.ObjectDecoder;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
@@ -63,12 +64,14 @@ public final class EchoClient {
                      }
                      //p.addLast(new LoggingHandler(LogLevel.INFO));
                      p.addLast(new EchoClientHandler());
+                     p.addLast(new NumberEncoder());
+                     p.addLast(new BigIntegerDecoder());
+                     ch.writeAndFlush(123);
                  }
              });
 
             // Start the client.
             ChannelFuture f = b.connect(HOST, PORT).sync();
-
             // Wait until the connection is closed.
             f.channel().closeFuture().sync();
         } finally {
