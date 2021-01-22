@@ -314,7 +314,7 @@ ChannelInitializer -> ChannelInitializer:initChannel()
 
 ## NioEventLoop事件轮询
 
-我们先来看一下`NioEventLoop`的构造函数
+NioEventLoop是Netty中用来接收客户端获取服务端请求的唯一入口，我们先来看一下`NioEventLoop`的构造函数
 
 ```java
 NioEventLoop(NioEventLoopGroup parent, Executor executor, SelectorProvider selectorProvider,
@@ -661,7 +661,193 @@ public void read() {
 }
 ```
 
-> 当Netty处理读事件时，首先会获取一个内存分配处理器，读取消息到分配的内存里，然后在ChannelPipeline上传播读事件，最终会在channel上移除read事件
+> 当Netty处理读事件时，首先会获取一个内存分配处理器，读取消息到分配的内存里（Netty内存分配器后面分析），然后在ChannelPipeline上传播读事件，最终会在channel上移除read事件。
 
+最后我们来看一下Netty是怎么处理异步任务的
 
+```java
+protected boolean runAllTasks(long timeoutNanos) {
+    // 从定时任务队列中取出任务添加到普通任务队列中
+    fetchFromScheduledTaskQueue();
+    // 从任务列表中取出一个任务
+    Runnable task = pollTask();
+    if (task == null) {
+        // 如果任务为空，表示没有普通任务可执行，直接执行tailTask任务队列中的任务
+        afterRunningAllTasks();
+        return false;
+    }
+	// 计算执行任务的截止时间（相对时间，当前时间减去服务启动时间再加上超时时间）
+    final long deadline = timeoutNanos > 0 ? ScheduledFutureTask.nanoTime() + timeoutNanos : 0;
+    long runTasks = 0;
+    long lastExecutionTime;
+    for (;;) {
+        // 安全的执行任务
+        safeExecute(task);
+        runTasks ++;
+        // 执行任务个数和0x3f（0011 1111）进行与运算，这里指的是当任务个数为64个时，进行一次截止时间判断
+        if ((runTasks & 0x3F) == 0) {
+            lastExecutionTime = ScheduledFutureTask.nanoTime();
+            // 如果当前时间大于了截止时间，则中断执行任务，这是为了把时间留出一部分来执行I/O事件
+            if (lastExecutionTime >= deadline) {
+                break;
+            }
+        }
+        task = pollTask();
+        // 如果任务为空，终止循环
+        if (task == null) {
+            lastExecutionTime = ScheduledFutureTask.nanoTime();
+            break;
+        }
+    }
+    // 最后执行尾部任务队列中的任务
+    afterRunningAllTasks();
+    this.lastExecutionTime = lastExecutionTime;
+    return true;
+}
+```
+
+> 首选执行异步任务有一个超时，通过这个超时时间来计算任务可以执行多久。首先netty会把定时任务合并到普通任务队列中，然后判断这个任务队列中是否有任务，如果没有任务，则先执行尾部任务队列，然后提前返回。如果有任务，则会计算任务的执行截止时间，每当任务执行了64个时，都会判断一下当前时间是否大于截止时间，如果大于了截止时间，则停止执行普通任务，然后再执行尾部任务队列。
+
+## ChannelPipeline事件传播与异常处理
+
+ChannelPipeline是Netty中非常非常非常重要的一个组件，Netty的事件传播以及我们自定义的业务处理，都是基于ChannelPipeline来实现的。在分析ChannelPipeline之前，我们先来了解一下与ChannelPipeline相关的另外三个超级重要的组件`ChannelHandler`、`ChannelInboundHandler`、`ChannelOutboundHandler`、`ChannelInboundInvoker`、`ChannelOutboundInvoker`，接下来我们就详细分析一下这几个组件的作用
+
+> `ChannelHandler`是`ChannelInboundHandler`和`ChannelOutboundHandler`的父类，里面定义了以下三个最基础的方法以及一个注解
+
+```java
+public interface ChannelHandler {
+	// 新建客户端连接触发
+    void handlerAdded(ChannelHandlerContext ctx) throws Exception;
+
+	// 客户端中断连接触发
+    void handlerRemoved(ChannelHandlerContext ctx) throws Exception;
+
+    // 当发生异常时触发
+    @Deprecated
+    void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception;
+
+    // 标识ChannelHandler是否可同时添加到不同的ChannelPipeline
+    @Inherited
+    @Documented
+    @Target(ElementType.TYPE)
+    @Retention(RetentionPolicy.RUNTIME)
+    @interface Sharable {
+        // no value
+    }
+}
+```
+
+> `ChannelInboundHandler`定义了一系列客户端连接消息事件处理。我们可以这样理解，当有客户端连接或者当客户端发消息到服务端时，消息的流向是从客户端到服务端，对于服务端来说，消息就是流进来。所以当消息流进来时，会经过一系列的`ChannelInboundHandler`处理，`ChannelInboundHandler`中定义了很多方法，如下所示，比如：客户端连接事件，注册事件，激活事件，消息读取事件等等
+
+```java
+public interface ChannelInboundHandler extends ChannelHandler {
+	// 客户端注册事件
+    void channelRegistered(ChannelHandlerContext ctx) throws Exception;
+	// 客户端取消注册事件
+    void channelUnregistered(ChannelHandlerContext ctx) throws Exception;
+	// 激活事件
+    void channelActive(ChannelHandlerContext ctx) throws Exception;
+	// 取消激活事件
+    void channelInactive(ChannelHandlerContext ctx) throws Exception;
+	// 消息读取事件
+    void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception;
+	// 消息读取完成事件
+    void channelReadComplete(ChannelHandlerContext ctx) throws Exception;
+	// 用户事件触发事件
+    void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception;
+	// Channel通道是否可读状态变更事件
+    void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception;
+	// 异常处理事件
+    @Override
+    @SuppressWarnings("deprecation")
+    void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception;
+```
+
+> `ChannelOutboundHandler`定义了一系列消息流出事件，对于服务端来说，当需要把消息回写给客户端时，就会经过`ChannelOutboundHandler`上的一系列事件处理。比如当发消息时，需要将消息进行编码处理，这时就是通过扩展`ChannelOutboundHandler`来实现
+
+```java
+public interface ChannelOutboundHandler extends ChannelHandler {
+	// 调用一次绑定操作
+    void bind(ChannelHandlerContext ctx, SocketAddress localAddress, ChannelPromise promise) throws Exception;
+
+   // 调用一次连接操作
+    void connect(
+            ChannelHandlerContext ctx, SocketAddress remoteAddress,
+            SocketAddress localAddress, ChannelPromise promise) throws Exception;
+
+    // 调用一次中断连接操作
+    void disconnect(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception;
+
+    //调用一次关闭连接操作
+    void close(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception;
+
+    // 调用一次取消注册操作，比如在NioEvevtLoop事件轮询时，取消Channel的注册就可触发该事件
+    void deregister(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception;
+
+    // 拦截 {@link ChannelHandlerContext#read()}的读事件
+    void read(ChannelHandlerContext ctx) throws Exception;
+
+    // 写数据事件
+    void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception;
+
+    // 刷数据到客户端事件
+    void flush(ChannelHandlerContext ctx) throws Exception;
+}
+```
+
+> `ChannelInboundInvoker`的作用就是中间传递Inbound事件，然后疯狂调用`ChannelInboundHandler`类中的方法，`ChannelOutboundInvoker`传递Outbound事件，调用`ChannelOutboundHandler`类中的方法
+
+接下来就到了我们的重头戏了，`ChannelPipeline`有一个默认的实现类`DefaultChannelPipeline`，每个SocketChannel都会绑定一个`DefaultChannelPipeline`，当接收到SocketChannel事件时，Netty就会把事件传递给`DefaultChannelPipeline`。我们着重分析一下这个类，先看下`DefaultChannelPipeline`的构造函数
+
+```java
+protected DefaultChannelPipeline(Channel channel) {
+    // 当前绑定的SocketChannel
+    this.channel = ObjectUtil.checkNotNull(channel, "channel");
+    // 一个channel的回调管理
+    succeededFuture = new SucceededChannelFuture(channel, null);
+    // 这也是一个channel的回调管理
+    voidPromise =  new VoidChannelPromise(channel, true);
+	// pipeline的尾节点
+    tail = new TailContext(this);
+    // pipeline的头节点
+    head = new HeadContext(this);
+    // 设置头节点的下一个节点是尾节点
+    head.next = tail;
+    // 设置尾节点的下一个节点是头节点
+    tail.prev = head;
+}
+```
+
+> `DefaultChannelPipeline`的内部结构是一个双向链表，当初始化`DefaultChannelPipeline`时，会初始化`DefaultChannelPipeline`相关联的`SocketChannel`，并且在链表上会初始化两个节点，一个头节点`HeadContext`，一个尾节点`TailContext`。链表上的元素其实都是`ChannelHandlerContext`，它会包装一个`ChannelHandler`，并且会保存一些上下文信息，比如当前`ChannelHandlerContext`关联的`DefaultChannelPipeline`对象等。当数据流入时，会从`HeadContext`传递到`TailContext`，数据流出时，会从`TailContext`传递到`HeadContext`，所以`HeadContext`有两个非常重要的职责，一是读取来自客户端的数据，二是往客户端写入数据。接下来我们详细分析一下`HeadContext`读数据与写数据职责。
+
+```java
+final class HeadContext extends AbstractChannelHandlerContext
+            implements ChannelOutboundHandler, ChannelInboundHandler {
+
+    private final Unsafe unsafe;
+
+    HeadContext(DefaultChannelPipeline pipeline) {
+        super(pipeline, null, HEAD_NAME, HeadContext.class);
+        unsafe = pipeline.channel().unsafe();
+        setAddComplete();
+    }
+    // 省略部分代码
+    @Override
+    public void read(ChannelHandlerContext ctx) {
+        // 开始读取来自客户端的数据
+        unsafe.beginRead();
+    }
+    @Override
+    public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
+        // 开始往缓冲区写数据
+        unsafe.write(msg, promise);
+    }
+    @Override
+    public void flush(ChannelHandlerContext ctx) {
+        // 刷缓冲区数据到客户端
+        unsafe.flush();
+    }
+    // 省略部分代码
+}
+```
 
