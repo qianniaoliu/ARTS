@@ -45,6 +45,7 @@ public class EchoClientHandler extends ChannelInboundHandlerAdapter {
     }
 
     @Override
+    @Skip
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
         ctx.write(msg);
     }

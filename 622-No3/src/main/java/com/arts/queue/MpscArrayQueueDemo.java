@@ -12,5 +12,7 @@ public class MpscArrayQueueDemo {
         mpscArrayQueue.offer(111);
         mpscArrayQueue.offer(222);
         mpscArrayQueue.offer(333);
+
+        System.out.println(0 | 1);
     }
 }

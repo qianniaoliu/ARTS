@@ -851,3 +851,400 @@ final class HeadContext extends AbstractChannelHandlerContext
 }
 ```
 
+读客户端数据比较简单，只是调用了一个`unsafe.beginRead()`方法，而该方法的具体实现可以看下面代码片段，只是修改了一个是否正在读取标识以及移除了读事件
+
+```java
+protected void doBeginRead() throws Exception {
+    // Channel.read() or ChannelHandlerContext.read() was called
+    final SelectionKey selectionKey = this.selectionKey;
+    if (!selectionKey.isValid()) {
+        return;
+    }
+	// 等待读取中的这个表示置为true，表示正在读取
+    readPending = true;
+    final int interestOps = selectionKey.interestOps();
+    if ((interestOps & readInterestOp) == 0) {
+        // 移除读事件
+        selectionKey.interestOps(interestOps | readInterestOp);
+    }
+}
+```
+
+我们再来看看下面的写数据流程，首先是获取当前的`ChannelOutboundBuffer`，如果为空，则提前返回。接着就是过滤消息以及计算消息的大小，为之后的添加数据到缓冲区作准备。
+
+```java
+public final void write(Object msg, ChannelPromise promise) {
+    assertEventLoop();
+	// 获取数据缓冲区
+    ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+    if (outboundBuffer == null) {
+        // 如果数据缓冲区为空，则触发失败回调并提前返回
+        safeSetFailure(promise, newClosedChannelException(initialCloseCause));
+        ReferenceCountUtil.release(msg);
+        return;
+    }
+    int size;
+    try {
+        // 过滤消息
+        msg = filterOutboundMessage(msg);
+        // 获取消息大小
+        size = pipeline.estimatorHandle().size(msg);
+        if (size < 0) {
+            size = 0;
+        }
+    } catch (Throwable t) {
+        safeSetFailure(promise, t);
+        ReferenceCountUtil.release(msg);
+        return;
+    }
+	// 将数据写到缓冲区
+    outboundBuffer.addMessage(msg, size, promise);
+}
+```
+
+详细分析一下`outboundBuffer.addMessage(msg, size, promise)`方法，看看Netty到底是怎么把数据追加到缓冲区的
+
+```java
+public void addMessage(Object msg, int size, ChannelPromise promise) {
+    // 把消息封装成Entry对象
+    Entry entry = Entry.newInstance(msg, size, total(msg), promise);
+    if (tailEntry == null) {
+        flushedEntry = null;
+    } else {
+        // 如果当前队列不为空，则将尾节点的下一个节点设置为新添加的节点
+        Entry tail = tailEntry;
+        tail.next = entry;
+    }
+    // 将尾节点设置为当前节点
+    tailEntry = entry;
+    if (unflushedEntry == null) {
+        unflushedEntry = entry;
+    }
+	// 增加缓冲区已用大小
+    incrementPendingOutboundBytes(entry.pendingSize, false);
+}
+private void incrementPendingOutboundBytes(long size, boolean invokeLater) {
+    if (size == 0) {
+        return;
+    }
+	// 追加后的缓冲区已用大小
+    long newWriteBufferSize = TOTAL_PENDING_SIZE_UPDATER.addAndGet(this, size);
+    if (newWriteBufferSize > channel.config().getWriteBufferHighWaterMark()) {
+        // 如果已用大小大于配置的最高可写水位，则设置当前已不可写，并且发送Channel可写状态变更事件
+        setUnwritable(invokeLater);
+    }
+}
+private void setUnwritable(boolean invokeLater) {
+    for (;;) {
+        final int oldValue = unwritable;
+        final int newValue = oldValue | 1;
+        // 使用CAS更新可写状态
+        if (UNWRITABLE_UPDATER.compareAndSet(this, oldValue, newValue)) {
+            if (oldValue == 0 && newValue != 0) {
+                // 如果状态更新成功，并且从可写变为不可写，则传递可写状态变更事件
+                fireChannelWritabilityChanged(invokeLater);
+            }
+            break;
+        }
+    }
+}
+```
+
+`ChannelOutboundBuffer`内部结构也是一个单向链表，里面有几个比较重要的属性，flushedEntry表示链表上第一个刷新到客户端的数据，unflushedEntry表示链表上第一个没有刷新到客户端的数据，tailEntry表示链表的尾节点。我们通过下面一个图来表示数据的追加过程
+
+![addMessage](D:\document\个人\学习日记\Netty画图\addMessage.png)
+
+我们再来看看数据的刷新到客户端的过程
+
+```java
+public final void flush() {
+    assertEventLoop();
+
+    ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+    if (outboundBuffer == null) {
+        return;
+    }
+	// 修改一些刷新数据标识
+    outboundBuffer.addFlush();
+    // 正儿八经执行刷新数据到客户端逻辑
+    flush0();
+}
+public void addFlush() {
+    // 获取链表上第一个未被刷新的数据
+    Entry entry = unflushedEntry;
+    if (entry != null) {
+        if (flushedEntry == null) {
+            // 如果刷新的第一个数据为空，则把第一个刷新的数据置为第一个未被刷新的数据
+            flushedEntry = entry;
+        }
+        do {
+            flushed ++;
+            if (!entry.promise.setUncancellable()) {
+                // 调用取消方法保证释放内存
+                int pending = entry.cancel();
+                // 减少buffer的使用量
+                decrementPendingOutboundBytes(pending, false, true);
+            }
+            entry = entry.next;
+        } while (entry != null);
+
+        // 当数据刷新完了过后，将未被刷新的标识置为null
+        unflushedEntry = null;
+    }
+}
+private void decrementPendingOutboundBytes(long size, boolean invokeLater, boolean notifyWritability) {
+    if (size == 0) {
+        return;
+    }
+	// 减少buffer的使用量
+    long newWriteBufferSize = TOTAL_PENDING_SIZE_UPDATER.addAndGet(this, -size);
+    if (notifyWritability && newWriteBufferSize < channel.config().getWriteBufferLowWaterMark()) {
+        // 如果buffer的使用量小于Channel配置的buffer最低水位，则表示buffer可写
+        setWritable(invokeLater);
+    }
+}
+private void setWritable(boolean invokeLater) {
+    for (;;) {
+        final int oldValue = unwritable;
+        final int newValue = oldValue & ~1;
+        // 使用CAS更新可写状态为可写
+        if (UNWRITABLE_UPDATER.compareAndSet(this, oldValue, newValue)) {
+            if (oldValue != 0 && newValue == 0) {
+                // 传递可写状态为可写的事件
+                fireChannelWritabilityChanged(invokeLater);
+            }
+            break;
+        }
+    }
+}
+```
+
+我们也从下面一张图来表示数据刷新过后buffer标识的最终形态，如果觉得有点不明白的话，可以结合上面那张数据写入的图与源码一起再分析一下，相信多看两遍就可以看懂了
+
+![addFlush](D:\document\个人\学习日记\Netty画图\addFlush.png)
+
+最后我们看看`flush0()`方法
+
+```java
+protected void flush0() {
+    if (inFlush0) {
+        // Avoid re-entrance
+        return;
+    }
+
+    final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+    if (outboundBuffer == null || outboundBuffer.isEmpty()) {
+        return;
+    }
+
+    inFlush0 = true;
+	// 省略部分代码
+    try {
+        // 执行数据刷新
+        doWrite(outboundBuffer);
+    } catch (Throwable t) {
+        // 省略部分代码
+    } finally {
+        inFlush0 = false;
+    }
+}
+
+// NioSocketChannel#doWrite()
+protected void doWrite(ChannelOutboundBuffer in) throws Exception {
+    // 获取当前的客户端Channel
+    SocketChannel ch = javaChannel();
+    // 配置可写多少次
+    int writeSpinCount = config().getWriteSpinCount();
+    do {
+        if (in.isEmpty()) {
+            // 如果buffer里没有数据，清除写事件
+            clearOpWrite();
+            return;
+        }
+        int maxBytesPerGatheringWrite = ((NioSocketChannelConfig) config).getMaxBytesPerGatheringWrite();
+        // 将Netty的buffer转换成java NIO的ByteBuffer
+        ByteBuffer[] nioBuffers = in.nioBuffers(1024, maxBytesPerGatheringWrite);
+        // 计算有几个buffer可写
+        int nioBufferCnt = in.nioBufferCount();
+
+        switch (nioBufferCnt) {
+            case 0:
+                // 当ByteBuffer为0时，我们可能还有其他东西要写，所以这里回退到普通的写操作
+                writeSpinCount -= doWrite0(in);
+                break;
+            case 1: {
+                // 有一个ByteBufer可写，所以这里获取第一个ByteBuffer
+                ByteBuffer buffer = nioBuffers[0];
+                // 需要写的数据大小
+                int attemptedBytes = buffer.remaining();
+                // 调用JAVA原生NIO的API执行写操作
+                final int localWrittenBytes = ch.write(buffer);
+                if (localWrittenBytes <= 0) {
+                    incompleteWrite(true);
+                    return;
+                }
+                adjustMaxBytesPerGatheringWrite(attemptedBytes, localWrittenBytes, maxBytesPerGatheringWrite);
+                // 移除已写的数据
+                in.removeBytes(localWrittenBytes);
+                // 可写次数减一
+                --writeSpinCount;
+                break;
+            }
+            default: {
+                long attemptedBytes = in.nioBufferSize();
+                // 如果有多个ByteBuffer需要写，则调用NIO的批量写 操作
+                final long localWrittenBytes = ch.write(nioBuffers, 0, nioBufferCnt);
+                if (localWrittenBytes <= 0) {
+                    incompleteWrite(true);
+                    return;
+                }
+                adjustMaxBytesPerGatheringWrite((int) attemptedBytes, (int) localWrittenBytes,
+                                                maxBytesPerGatheringWrite);
+                // 移除已写的数据
+                in.removeBytes(localWrittenBytes);
+                // 可写次数减一
+                --writeSpinCount;
+                break;
+            }
+        }
+    } while (writeSpinCount > 0);
+	// 如果数据刷完了，则移除写事件，如果数据没有刷完，则会再执行一次刷新操作
+    incompleteWrite(writeSpinCount < 0);
+}
+```
+
+上面，我们把HeadContext的读写数据重要流程分析完了，接下来，我们看一下事件是怎么在`DefaultChannelPipeline`的链表上传播的，先看一下`AbstractChannelHandlerContext#fireChannelRead()`方法
+
+```java
+public ChannelHandlerContext fireChannelRead(final Object msg) {
+    // 调用实现了ChannelInboundHandler的方法
+    invokeChannelRead(findContextInbound(MASK_CHANNEL_READ), msg);
+    return this;
+}
+
+// 查找ChannelInboundHandler
+private AbstractChannelHandlerContext findContextInbound(int mask) {
+    AbstractChannelHandlerContext ctx = this;
+    EventExecutor currentExecutor = executor();
+    do {
+        // 当前Context的下一个Context，对于第一次进来，当前Context就是HeadContext
+        ctx = ctx.next;
+    } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_INBOUND));// 会忽略掉不是ChannelInboundHandler类和标注了@Skip注解的类
+    return ctx;
+}
+private static boolean skipContext(
+            AbstractChannelHandlerContext ctx, EventExecutor currentExecutor, int mask, int onlyMask) {
+    return (ctx.executionMask & (onlyMask | mask)) == 0 ||
+        (ctx.executor() == currentExecutor && (ctx.executionMask & mask) == 0);
+}
+static void invokeChannelRead(final AbstractChannelHandlerContext next, Object msg) {
+    // 针对ReferenceCounted类型的消息做特殊处理
+    final Object m = next.pipeline.touch(ObjectUtil.checkNotNull(msg, "msg"), next);
+    EventExecutor executor = next.executor();
+    if (executor.inEventLoop()) {
+        // 实际调用Channel的Read方法进行数据的读取进行传播
+        next.invokeChannelRead(m);
+    } else {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                // 实际调用Channel的Read方法进行数据的读取进行传播
+                next.invokeChannelRead(m);
+            }
+        });
+    }
+}
+```
+
+总结一下，对于数据流入来说，`DefaultChannelPipeline`的处理链路是HeadContext到TailContext，然后中间只找ChannelInboundHandler的实现类以及没有被@Skip注解标注的方法，通过ChannelHandlerContext的next元素，一个一个的执行read方法，最终就会调用到TailContext的read方法然后结束。此时你就可能会想，要是我在调用过程中出现了未知异常怎么办？下面我们接着分析一下Netty是怎么处理执行链路过程中产生的异常，`AbstractChannelHandlerContext`有个fireExceptionCaught方法，它就是用来传递异常的，我们先看看以下代码片段
+
+```java
+public ChannelHandlerContext fireExceptionCaught(final Throwable cause) {
+    // 通过MASK_EXCEPTION_CAUGHT掩码查找ChannelInboundHandler实现了exceptionCaught的方法
+    invokeExceptionCaught(findContextInbound(MASK_EXCEPTION_CAUGHT), cause);
+    return this;
+}
+
+static void invokeExceptionCaught(final AbstractChannelHandlerContext next, final Throwable cause) {
+    ObjectUtil.checkNotNull(cause, "cause");
+    EventExecutor executor = next.executor();
+    if (executor.inEventLoop()) {
+        // 调用异常处理方法
+        next.invokeExceptionCaught(cause);
+    } else {
+        try {
+            executor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    next.invokeExceptionCaught(cause);
+                }
+            });
+        } catch (Throwable t) {
+        }
+    }
+}
+```
+
+> 其实异常的处理链路和读取操作的处理链路模式是基本一致的，只是一个调用的是read方法，一个调用的是exceptionCaught方法。我们可以看出Netty查找异常方法时，是用的`AbstractChannelHandlerContext`的next元素向后查找的，所以当我们使用ChannelHandler进行统一的异常处理时，应把异常处理的ChannelHandler添加到`DefaultChannelPipeline`处理链的最后，这样才能捕获所有的业务异常
+
+接下来我们再看一下数据的流出，也就是数据的写入链路是怎样的，我们从方法`Channel#writeAndFlush()`入口开始看，Channel接口继承于`ChannelOutboundInvoker`接口，最终是通过`AbstractChannel`类来实现的，所以这里我们直接从`AbstractChannel`类看
+
+```java
+// AsbtractChannel
+public ChannelFuture writeAndFlush(Object msg) {
+    return pipeline.writeAndFlush(msg);
+}
+// DefaultChannelPipeline
+ public final ChannelFuture writeAndFlush(Object msg) {
+     return tail.writeAndFlush(msg);
+ }
+```
+
+从上面的代码片段可以看出，`AbstractChannel#writeAndFlush()`方法其实是直接转调的`DefaultChannelPipeline#writeAndFlush()`方法，然后`DefaultChannelPipeline`又会去调`TailContext#writeAndFlush`方法，所以我们再来分析`TailContext#writeAndFlush()`方法
+
+```java
+public ChannelFuture writeAndFlush(Object msg) {
+    return writeAndFlush(msg, newPromise());
+}
+
+public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) {
+    write(msg, true, promise);
+    return promise;
+}
+
+private void write(Object msg, boolean flush, ChannelPromise promise) {
+    ObjectUtil.checkNotNull(msg, "msg");
+	// 省略部分代码
+    // 查找ChannelOutboundHandlerContext类型的write方法，并且会忽略掉标注了@Skip注解的方法
+    final AbstractChannelHandlerContext next = findContextOutbound(flush ?
+                                                                   (MASK_WRITE | MASK_FLUSH) : MASK_WRITE);
+    final Object m = pipeline.touch(msg, next);
+    EventExecutor executor = next.executor();
+    if (executor.inEventLoop()) {
+        if (flush) {
+            // 写入并刷新缓冲区
+            next.invokeWriteAndFlush(m, promise);
+        } else {
+            // 写入缓冲区
+            next.invokeWrite(m, promise);
+        }
+    } else {
+        // 如果不是当前事件轮询线程，则封装成一个异步任务
+        final WriteTask task = WriteTask.newInstance(next, m, promise, flush);
+        // 安全的执行任务，其实也就是捕获了异常
+        if (!safeExecute(executor, task, promise, m, !flush)) {
+            // 如果任务执行失败，则需要将缓冲区里面新加的数据清理掉，避免浪费缓冲区
+            task.cancel();
+        }
+    }
+}
+```
+
+从上面的代码片段可以看出，数据写入到客户端，是从TailContext流向到HeadContext，并且查找的是`ChannelOutboundHandlerContext`类型的类来做处理，最终通过`HeadContext#write()`方法回写到客户端，
+
+写入处理链发生异常的处理方式和上面的读取异常处理方式是一样的，所以这里就不再分析了
+
+### 总结
+
+`DefaultChannelPipeline`是Netty数据处理链最重要的部分，它的核心就是数据读取是从HeadContext传递到TailContext，数据写入是从TailContext传递到HeadContext，所以`DefaultChannelPipeline`设计的是一个双向链表，对我们用户来说，我们自定义的业务处理Handler就添加在HeadContext与TailContext之间，数据的读取和数据的写入都是在HeadContext中进行。在处理链中，通过掩码的方式来筛选符合条件的ChannelHandler，这种设计真的非常的巧妙，我们平时工作中也可以参考一波
+

@@ -12,6 +12,7 @@
         <module>518-No1</module>
         <module>615-No2</module>
         <module>622-No3</module>
+        <module>data-structure-algorithm</module>
     </modules>
 
     <properties>
