@@ -13,6 +13,8 @@
         <module>615-No2</module>
         <module>622-No3</module>
         <module>data-structure-algorithm</module>
+        <module>2021-ARTS</module>
+        <module>01</module>
     </modules>
 
     <properties>
