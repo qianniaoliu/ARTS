@@ -1,4 +1,14 @@
 # ARTS
+## 新技术持续关注
+- vertx
+- reactive stream
+- quarkus
+- Serverless
+- Service Mesh
+- Kubernetes
+- 边缘计算
+- Istio
+- Prometheus
 
 ## 五月十八日第一周
 
