@@ -14,4 +14,9 @@ public class IndexController {
     public String requestParam(@RequestParam String hello){
         return hello;
     }
+
+    @GetMapping("/test/requestParamX")
+    public String requestParamX(@RequestParam String hello){
+        return hello;
+    }
 }
