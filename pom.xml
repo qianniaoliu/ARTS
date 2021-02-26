@@ -15,6 +15,8 @@
         <module>data-structure-algorithm</module>
         <module>2021-ARTS</module>
         <module>01</module>
+        <module>sharding-jdbc</module>
+        <module>2021-ARTS/sharding-jdbc</module>
     </modules>
 
     <properties>

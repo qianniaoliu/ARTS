@@ -419,3 +419,196 @@ public Mono<HandlerResult> handle(ServerWebExchange exchange, Object handler) {
 
 ![图图图 (2)](C:\Users\cdshenlong1\Downloads\图图图 (2).png)
 
+注解模式也是从`DispatcherHandler`入口开始的，扫描的注解信息是通过`RequestMappingHandlerMapping`存储的，`RequestMappingHandlerMapping`是一个Spring的Bean，是通过`WebFluxConfigurationSupport`配置类初始化的，直接在下面这段初始化代码。
+
+```java
+@Bean
+public RequestMappingHandlerMapping requestMappingHandlerMapping(
+    @Qualifier("webFluxContentTypeResolver") RequestedContentTypeResolver contentTypeResolver) {
+	// 实例化对象
+    RequestMappingHandlerMapping mapping = createRequestMappingHandlerMapping();
+    mapping.setOrder(0);
+    // 配置Content-Type的解析器
+    mapping.setContentTypeResolver(contentTypeResolver);
+    // 配置路径匹配配置器
+    PathMatchConfigurer configurer = getPathMatchConfigurer();
+    configureAbstractHandlerMapping(mapping, configurer);
+    Map<String, Predicate<Class<?>>> pathPrefixes = configurer.getPathPrefixes();
+    if (pathPrefixes != null) {
+        mapping.setPathPrefixes(pathPrefixes);
+    }
+
+    return mapping;
+}
+@Bean
+public RequestedContentTypeResolver webFluxContentTypeResolver() {
+    RequestedContentTypeResolverBuilder builder = new RequestedContentTypeResolverBuilder();
+    configureContentTypeResolver(builder);
+    return builder.build();
+}
+
+public RequestedContentTypeResolver build() {
+    // 这里candidates为空，所以会实例化一个HeaderContentTypeResolver对象
+    List<RequestedContentTypeResolver> resolvers = (!this.candidates.isEmpty() ?
+                                                    this.candidates.stream().map(Supplier::get).collect(Collectors.toList()) :
+                                                    Collections.singletonList(new HeaderContentTypeResolver()));
+	// 创建一个内部类，利用HeaderContentTypeResolver来解析请求的媒体类型
+    return exchange -> {
+        for (RequestedContentTypeResolver resolver : resolvers) {
+            List<MediaType> mediaTypes = resolver.resolveMediaTypes(exchange);
+            if (mediaTypes.equals(RequestedContentTypeResolver.MEDIA_TYPE_ALL_LIST)) {
+                continue;
+            }
+            return mediaTypes;
+        }
+        return RequestedContentTypeResolver.MEDIA_TYPE_ALL_LIST;
+    };
+}
+```
+
+上面的代码简单来说就是实例化了一个`RequestMappingHandlerMapping`对象，并配置了一个`HeaderContentTypeResolver`媒体类型解析器以及一个`PathMatchConfigurer`路径匹配器，最后交给Spring管理，接下来我们详细分析一下`RequestMappingHandlerMapping`内部逻辑。
+
+```java
+// @link RequestMappingHandlerMapping
+public void afterPropertiesSet() {
+    this.config = new RequestMappingInfo.BuilderConfiguration();
+    // 配置路径解析器
+    this.config.setPatternParser(getPathPatternParser());
+    // 配置媒体类型解析器
+    this.config.setContentTypeResolver(getContentTypeResolver());
+    super.afterPropertiesSet();
+}
+
+// @link AbstractHandlerMethodMapping
+public void afterPropertiesSet() {
+    // 初始化HandlerMethod
+    initHandlerMethods();
+
+    // Total includes detected mappings + explicit registrations via registerMapping..
+    int total = this.getHandlerMethods().size();
+
+    if ((logger.isTraceEnabled() && total == 0) || (logger.isDebugEnabled() && total > 0) ) {
+        logger.debug(total + " mappings in " + formatMappingName());
+    }
+}
+
+protected void initHandlerMethods() {
+    // 获取所有的bean名称
+    String[] beanNames = obtainApplicationContext().getBeanNamesForType(Object.class);
+    for (String beanName : beanNames) {
+        if (!beanName.startsWith(SCOPED_TARGET_NAME_PREFIX)) {
+            Class<?> beanType = null;
+            try {
+                // 通过bean的名称获取bean的class
+                beanType = obtainApplicationContext().getType(beanName);
+            }
+            catch (Throwable ex) {
+                // An unresolvable bean type, probably from a lazy bean - let's ignore it.
+                if (logger.isTraceEnabled()) {
+                    logger.trace("Could not resolve type for bean '" + beanName + "'", ex);
+                }
+            }
+            if (beanType != null && isHandler(beanType)) {
+                detectHandlerMethods(beanName);
+            }
+        }
+    }
+    handlerMethodsInitialized(getHandlerMethods());
+}
+
+// 判断bean上是否有Controller或RequestMapping注解
+protected boolean isHandler(Class<?> beanType) {
+    return (AnnotatedElementUtils.hasAnnotation(beanType, Controller.class) ||
+            AnnotatedElementUtils.hasAnnotation(beanType, RequestMapping.class));
+}
+
+protected void detectHandlerMethods(final Object handler) {
+    Class<?> handlerType = (handler instanceof String ?
+                            obtainApplicationContext().getType((String) handler) : handler.getClass());
+
+    if (handlerType != null) {
+        // 如果是字节码提升了的类，则获取他的父类
+        final Class<?> userType = ClassUtils.getUserClass(handlerType);
+        // 解析所有标注了@RequestMapping注解的方法
+        Map<Method, T> methods = MethodIntrospector.selectMethods(userType,
+                                                                  (MethodIntrospector.MetadataLookup<T>) method -> getMappingForMethod(method, userType));
+        if (logger.isTraceEnabled()) {
+            logger.trace(formatMappings(userType, methods));
+        }
+        methods.forEach((method, mapping) -> {
+            Method invocableMethod = AopUtils.selectInvocableMethod(method, userType);
+            // 将解析的方法注册到mappingRegistry
+            registerHandlerMethod(handler, invocableMethod, mapping);
+        });
+    }
+}
+
+public static <T> Map<Method, T> selectMethods(Class<?> targetType, final MetadataLookup<T> metadataLookup) {
+    final Map<Method, T> methodMap = new LinkedHashMap<>();
+    Set<Class<?>> handlerTypes = new LinkedHashSet<>();
+    Class<?> specificHandlerType = null;
+
+    if (!Proxy.isProxyClass(targetType)) {
+        specificHandlerType = ClassUtils.getUserClass(targetType);
+        handlerTypes.add(specificHandlerType);
+    }
+    handlerTypes.addAll(ClassUtils.getAllInterfacesForClassAsSet(targetType));
+	// 遍历所有的class
+    for (Class<?> currentHandlerType : handlerTypes) {
+        final Class<?> targetClass = (specificHandlerType != null ? specificHandlerType : currentHandlerType);
+		// 利用反射解析targetClass中所有的方法
+        ReflectionUtils.doWithMethods(currentHandlerType, method -> {
+            Method specificMethod = ClassUtils.getMostSpecificMethod(method, targetClass);
+            // 筛选标注了@RequestMapping的方法，对应调用了下面的方法getMappingForMethod
+            T result = metadataLookup.inspect(specificMethod);
+            if (result != null) {
+                Method bridgedMethod = BridgeMethodResolver.findBridgedMethod(specificMethod);
+                if (bridgedMethod == specificMethod || metadataLookup.inspect(bridgedMethod) == null) {
+                    methodMap.put(specificMethod, result);
+                }
+            }
+        }, ReflectionUtils.USER_DECLARED_METHODS);
+    }
+
+    return methodMap;
+}
+
+protected RequestMappingInfo getMappingForMethod(Method method, Class<?> handlerType) {
+    // 如果方法上标注了@RequestMapping，则返回RequestMappingInfo，否则返回null
+    RequestMappingInfo info = createRequestMappingInfo(method);
+    if (info != null) {
+        // 判断方法所在类上面是否标注了@RequestMapping，有则返回RequestMappingInfo，否则返回null
+        RequestMappingInfo typeInfo = createRequestMappingInfo(handlerType);
+        if (typeInfo != null) {
+            // 合并方法注解与类注解信息，比如访问路径的拼接
+            info = typeInfo.combine(info);
+        }
+        for (Map.Entry<String, Predicate<Class<?>>> entry : this.pathPrefixes.entrySet()) {
+            if (entry.getValue().test(handlerType)) {
+                String prefix = entry.getKey();
+                if (this.embeddedValueResolver != null) {
+                    prefix = this.embeddedValueResolver.resolveStringValue(prefix);
+                }
+                // 拼接路径前缀
+                info = RequestMappingInfo.paths(prefix).options(this.config).build().combine(info);
+                break;
+            }
+        }
+    }
+    return info;
+}
+
+private RequestMappingInfo createRequestMappingInfo(AnnotatedElement element) {
+    // 查找类与方法上的@RequestMapping注解
+    RequestMapping requestMapping = AnnotatedElementUtils.findMergedAnnotation(element, RequestMapping.class);
+    RequestCondition<?> condition = (element instanceof Class ?
+                                     getCustomTypeCondition((Class<?>) element) : getCustomMethodCondition((Method) element));
+    return (requestMapping != null ? createRequestMappingInfo(requestMapping, condition) : null);
+}
+
+protected void registerHandlerMethod(Object handler, Method method, T mapping) {
+    //注册信息到注册中心
+    this.mappingRegistry.register(mapping, handler, method);
+}
+```
+
