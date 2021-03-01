@@ -56,12 +56,15 @@ public class ShardingJdbcDemo {
         // 创建 ShardingSphereDataSource
         DataSource dataSource = ShardingSphereDataSourceFactory.createDataSource(dataSourceMap, Collections.singleton(shardingRuleConfig), new Properties());
 
-//        String sql = "SELECT * FROM ware_ware WHERE ware_id=?";
-        String sql = "INSERT INTO ware_ware (ware_id, title) VALUES (?, ?) ";
+        String sql = "SELECT * FROM ware_ware WHERE ware_id=? and title=?";
+//        String sql = "INSERT INTO ware_ware (ware_id, title) VALUES (?, ?) ";
         Connection connection = dataSource.getConnection();
         PreparedStatement ps = connection.prepareStatement(sql);
         ps.setLong(1, 5);
-        ps.setString(2, "test5");
-        ps.executeUpdate();
+        ps.setString(2, "test566");
+        ResultSet rs = ps.executeQuery();
+        while (rs.next()){
+            System.out.println();
+        }
     }
 }
