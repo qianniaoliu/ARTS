@@ -34,9 +34,12 @@ public class ShardingJdbcDemo {
         druidDataSource.setUrl("jdbc:mysql://11.91.139.199:3306/ept_ware");
         dataSourceMap.put("ept_ware",druidDataSource);
 
+        // 配置表规则
         ShardingTableRuleConfiguration wareTableRuleConfig
                 = new ShardingTableRuleConfiguration("ware_ware", "ept_ware.ware_ware_${0..1}");
+        // 配置分库策略
         wareTableRuleConfig.setDatabaseShardingStrategy(new StandardShardingStrategyConfiguration("ware_id", "dbShardingAlgorithm"));
+        // 配置分表策略
         wareTableRuleConfig.setTableShardingStrategy(new StandardShardingStrategyConfiguration("ware_id", "tableShardingAlgorithm"));
 
         // 配置分片规则
@@ -56,12 +59,12 @@ public class ShardingJdbcDemo {
         // 创建 ShardingSphereDataSource
         DataSource dataSource = ShardingSphereDataSourceFactory.createDataSource(dataSourceMap, Collections.singleton(shardingRuleConfig), new Properties());
 
-        String sql = "SELECT * FROM ware_ware WHERE ware_id=? and title=?";
+        String sql = "SELECT * FROM ware_ware WHERE title=?";
 //        String sql = "INSERT INTO ware_ware (ware_id, title) VALUES (?, ?) ";
         Connection connection = dataSource.getConnection();
         PreparedStatement ps = connection.prepareStatement(sql);
-        ps.setLong(1, 5);
-        ps.setString(2, "test566");
+//        ps.setLong(1, 5);
+        ps.setString(1, "test566");
         ResultSet rs = ps.executeQuery();
         while (rs.next()){
             System.out.println();

@@ -13,6 +13,8 @@
     <packaging>pom</packaging>
     <modules>
         <module>Q1</module>
+        <module>grpc</module>
+        <module>spring-data</module>
     </modules>
 
 
