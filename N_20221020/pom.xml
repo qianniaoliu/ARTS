@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>ARTS</artifactId>
+        <groupId>com.arts</groupId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>N_20221020</artifactId>
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <zdal.version>5.15.0</zdal.version>
+        <confkeeper.version>0.4.1</confkeeper.version>
+        <fastjson.version>1.2.8.sec02</fastjson.version>
+        <oceanbase.connector.version>3.2.0</oceanbase.connector.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>cglib</groupId>
+            <artifactId>cglib</artifactId>
+            <version>3.3.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-client-plugin-bom</artifactId>
+            <version>${zdal.version}</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-client</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-group-datasource</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-atom-datasource</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-rule</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-parser</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-parser-antlr</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-parser-druid</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-parser-spi</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-config</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-common</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-sequence</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <!-- 无 ob 数据源 zdal-oceanbase 可以不加 -->
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-oceanbase</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-atom-datasource-jboss</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-monitor</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-adapter-sofa</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.zdal</groupId>
+            <artifactId>zdal-adapter-spring</artifactId>
+            <version>${zdal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.sofa.common.log</groupId>
+            <artifactId>sofa-middleware-log</artifactId>
+            <version>1.0.5</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>druid</artifactId>
+            <version>1.0.14</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>16.0.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.common</groupId>
+            <artifactId>tracer-biz</artifactId>
+            <version>1.2.11</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.data.conf</groupId>
+            <artifactId>confkeeper-client</artifactId>
+            <version>${confkeeper.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.data.conf</groupId>
+            <artifactId>confkeeper-core</artifactId>
+            <version>${confkeeper.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.data.conf</groupId>
+            <artifactId>confkeeper-common</artifactId>
+            <version>${confkeeper.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.data.conf</groupId>
+            <artifactId>confkeeper-drm</artifactId>
+            <version>${confkeeper.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>fastjson</artifactId>
+            <version>${fastjson.version}</version>
+        </dependency>
+
+        <!-- OB 新客户端依赖 -->
+        <dependency>
+            <groupId>com.alipay.oceanbase</groupId>
+            <artifactId>oceanbase</artifactId>
+            <version>2.0.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alipay.oceanbase</groupId>
+            <artifactId>oceanbase-connector-java</artifactId>
+            <version>${oceanbase.connector.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.json</groupId>
+            <artifactId>json</artifactId>
+            <version>20160810</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.toolkit.common</groupId>
+            <artifactId>toolkit-common-logging</artifactId>
+            <version>1.13</version>
+        </dependency>
+        <!-- OB1.0 新客户端依赖 END -->
+
+        <dependency>
+            <groupId>com.alipay.lookout</groupId>
+            <artifactId>lookout-api</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+
+        <!--    mybatis    -->
+        <dependency>
+            <groupId>org.mybatis</groupId>
+            <artifactId>mybatis-spring</artifactId>
+            <version>2.0.7</version>
+        </dependency>
+        <dependency>
+            <groupId>org.mybatis</groupId>
+            <artifactId>mybatis</artifactId>
+            <version>3.5.11</version>
+        </dependency>
+
+        <!-- https://mvnrepository.com/artifact/org.slf4j/slf4j-log4j12 -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-log4j12</artifactId>
+            <version>2.0.3</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.alibaba.nacos</groupId>
+            <artifactId>nacos-spring-context</artifactId>
+            <version>1.1.1</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.alibaba.nacos</groupId>
+            <artifactId>nacos-client</artifactId>
+            <version>2.1.2</version>
+        </dependency>
+
+    </dependencies>
+
+</project>

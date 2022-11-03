@@ -6,15 +6,27 @@
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
-        <module name="518-No1" />
         <module name="615-No2" />
+        <module name="aop" />
+        <module name="tomcat" />
+        <module name="20210623" />
+        <module name="concurrent" />
+        <module name="N_20221020" />
+        <module name="518-No1" />
       </profile>
     </annotationProcessing>
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="20210623" options="-parameters" />
       <module name="518-No1" options="-parameters" />
       <module name="615-No2" options="-parameters" />
+      <module name="ARTS" options="" />
+      <module name="N_20221020" options="-parameters" />
+      <module name="aop" options="-parameters" />
+      <module name="concurrent" options="-parameters" />
+      <module name="spring" options="" />
+      <module name="tomcat" options="-parameters" />
     </option>
   </component>
 </project>

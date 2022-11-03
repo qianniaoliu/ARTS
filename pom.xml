@@ -4,6 +4,13 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.5.2</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+
     <groupId>com.arts</groupId>
     <artifactId>ARTS</artifactId>
     <packaging>pom</packaging>
@@ -11,10 +18,15 @@
     <modules>
         <module>518-No1</module>
         <module>615-No2</module>
+        <module>tomcat</module>
+        <module>20210623</module>
+        <module>spring</module>
+        <module>concurrent</module>
+        <module>N_20221020</module>
     </modules>
 
     <properties>
-        <jdk.version>1.8</jdk.version>
+        <jdk.version>11</jdk.version>
         <maven-compiler-plugin.version>3.7.0</maven-compiler-plugin.version>
     </properties>
 
